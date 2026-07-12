@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+cache/
+library/
+*.tmisc
+!tests/data/*.tmisc
+catalog.db
+catalog.db-wal
+catalog.db-shm
+.pytest_cache/

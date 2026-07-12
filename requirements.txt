@@ -1,5 +1,20 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
+# El id de un track es el BLAKE3 de su audio. Dependencia dura a propósito: un
+# fallback silencioso a otro hash daría ids distintos y rompería el dedupe.
+blake3>=0.4
+# Tags y carátula embebida al importar audio que ya está en disco.
+mutagen>=1.47
+# Solo los usa el camino LSB legacy y la generación/reescalado de portadas.
+# El camino de streaming no importa ninguno de los dos.
 pillow>=10.0
 numpy>=1.26
+# P2P LAN: identidad Ed25519 + certs X.509 autofirmados (pinning TLS entre
+# nodos). La crypto del data path es TLS estándar; aquí no se inventa nada.
+cryptography>=42
+# Descubrimiento de nodos en la LAN (_tmisc._tcp.local.). Azúcar, no requisito:
+# `tmisc peers add IP:puerto` funciona sin multicast.
+zeroconf>=0.132
+# Cliente HTTP del canal peer<->peer (streaming con Range + pinning).
+httpx>=0.27
