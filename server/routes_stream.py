@@ -43,13 +43,14 @@ def _info_from_row(row) -> TmiscInfo:
     )
 
 
-def _resolve(catalog, track_id: str) -> TmiscInfo:
-    row = catalog.resolve(track_id)
+def _resolve(catalog, ident: str) -> tuple[str, TmiscInfo]:
+    """(id canónico, info). Acepta prefijos: ver Catalog.expand_id."""
+    row = catalog.resolve(ident)
     if row is None:
         raise HTTPException(404, "Track no encontrado en el catálogo.")
     if not os.path.exists(row["path"]):
         raise HTTPException(410, "El fichero ya no está en disco; reindexa el catálogo.")
-    return _info_from_row(row)
+    return row["id"], _info_from_row(row)
 
 
 def _materialize_lsb(settings, info: TmiscInfo, track_id: str) -> TmiscInfo:
@@ -79,25 +80,32 @@ def _materialize_lsb(settings, info: TmiscInfo, track_id: str) -> TmiscInfo:
     )
 
 
-async def _resolve_or_remote(request: Request, track_id: str):
+async def _resolve_or_remote(request: Request, ident: str):
     """Camino local o, si este nodo no tiene el track, la metadata de un peer.
 
-    Devuelve (info_local, None) o (None, (peer, meta_remota)). 404 si nadie lo
-    tiene — incluida la propia consulta a los peers, así que un id inexistente
-    cuesta como mucho un round-trip por peer cada 30 s (caché negativa).
+    Devuelve (id_canónico, info_local, None) o (id_canónico, None, (peer, meta)).
+    404 si nadie lo tiene — incluida la consulta a los peers, así que un id
+    inexistente cuesta como mucho un round-trip por peer cada 30 s (caché
+    negativa).
+
+    El id canónico es SIEMPRE el de 64 hex, nunca el prefijo que haya pedido el
+    cliente: de él cuelgan el ETag, el nombre en el caché y la verificación del
+    BLAKE3 al traer el fichero del peer. Con un prefijo, esa verificación
+    fallaría siempre.
     """
     catalog = get_catalog(request)
-    row = catalog.resolve(track_id)
+    row = catalog.resolve(ident)
     if row is not None:
         if not os.path.exists(row["path"]):
             raise HTTPException(410, "El fichero ya no está en disco; reindexa el catálogo.")
-        return _info_from_row(row), None
+        return row["id"], _info_from_row(row), None
 
     network = request.app.state.network
     if network is not None:
-        found = await network.resolve_remote(track_id)
+        found = await network.resolve_remote(ident)
         if found is not None:
-            return None, found
+            # El peer expande el prefijo contra SU catálogo y devuelve el id entero.
+            return found[1]["id"], None, found
     raise HTTPException(404, "Track no encontrado en el catálogo.")
 
 
@@ -116,8 +124,7 @@ def _pipe_remote(network, peer, track_id: str, abs_start: int, abs_end: int):
 
 @router.api_route("/stream/{ident}", methods=["GET", "HEAD"])
 async def stream(ident: str, request: Request):
-    track_id = parse_ident(ident)
-    info, remote = await _resolve_or_remote(request, track_id)
+    track_id, info, remote = await _resolve_or_remote(request, parse_ident(ident))
 
     if remote is not None:
         return await _stream_remote(request, track_id, remote)
@@ -194,9 +201,8 @@ async def _stream_remote(request: Request, track_id: str, found):
 
 @router.api_route("/cover/{ident}", methods=["GET", "HEAD"])
 async def cover(ident: str, request: Request, size: int | None = None):
-    track_id = parse_ident(ident)
     wants_jpeg = ident.endswith((".jpg", ".jpeg")) or size is not None
-    info, remote = await _resolve_or_remote(request, track_id)
+    track_id, info, remote = await _resolve_or_remote(request, parse_ident(ident))
 
     if remote is not None:
         return await _cover_remote(request, track_id, remote, wants_jpeg, size)
@@ -280,8 +286,7 @@ async def _cover_remote(request: Request, track_id: str, found,
 
 @router.get("/track/{ident}")
 async def track(ident: str, request: Request):
-    track_id = parse_ident(ident)
-    info, remote = await _resolve_or_remote(request, track_id)
+    track_id, info, remote = await _resolve_or_remote(request, parse_ident(ident))
     base = base_url(request)
 
     import json
@@ -318,8 +323,7 @@ async def track(ident: str, request: Request):
 @router.api_route("/file/{ident}", methods=["GET", "HEAD"])
 def file(ident: str, request: Request):
     """El .tmisc entero, con Range. Para P2P y para descargar el contenedor."""
-    track_id = parse_ident(ident)
-    info = _resolve(get_catalog(request), track_id)
+    track_id, info = _resolve(get_catalog(request), parse_ident(ident))
     total = info.file_size
 
     headers = {

@@ -116,12 +116,14 @@ def p2p_catalog(request: Request, q: str | None = None,
 def p2p_track(ident: str, request: Request):
     """La metadata que la pasarela necesita para servir sin tocar la red:
     offsets para trasladar Ranges, tamaños para HEAD/416, mime para VLC."""
-    track_id = parse_ident(ident)
     cat = get_catalog(request)
-    row = cat.resolve(track_id)
+    row = cat.resolve(parse_ident(ident))
     if row is None or not os.path.exists(row["path"]):
         raise HTTPException(404, "Este nodo no tiene el track.")
 
+    # El id que devolvemos es el canónico, no el que haya pedido el peer: la
+    # pasarela del otro lado lo usa para verificar el BLAKE3 de lo que descargue.
+    track_id = row["id"]
     raw = cat.get_meta_json(track_id)
     return JSONResponse({
         "id": track_id,
@@ -146,10 +148,10 @@ def p2p_file(ident: str, request: Request):
     Sirve para el streaming proxied (la pasarela traslada el rango del audio a
     [audio_offset+s, audio_offset+e]) y para el fetch-through al caché.
     """
-    track_id = parse_ident(ident)
-    row = get_catalog(request).resolve(track_id)
+    row = get_catalog(request).resolve(parse_ident(ident))
     if row is None or not os.path.exists(row["path"]):
         raise HTTPException(404, "Este nodo no tiene el track.")
+    track_id = row["id"]
     info = _info_from_row(row)
 
     headers = {

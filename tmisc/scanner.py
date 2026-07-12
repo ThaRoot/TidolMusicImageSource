@@ -12,6 +12,7 @@ cosas se hacen UNA vez y quedan cacheadas en SQLite.
 """
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -57,14 +58,25 @@ def iter_candidates(root: str):
                 yield e
 
 
-def scan(library: str, catalog: Catalog,
+def scan(roots: str | Sequence[str], catalog: Catalog,
          progress: Callable[[ScanStats], None] | None = None) -> ScanStats:
+    """Reindexa el catálogo a partir de una o varias raíces.
+
+    Varias raíces, y no una llamada por raíz, porque al final se olvida todo path
+    conocido que no se haya visto: dos pasadas independientes harían que la
+    segunda desindexase lo que encontró la primera.
+    """
+    if isinstance(roots, str):
+        roots = [roots]
+
     stats = ScanStats()
     known = catalog.known_files()
     seen: set[str] = set()
 
-    for entry in iter_candidates(library):
+    for entry in (e for root in roots for e in iter_candidates(root)):
         path = entry.path
+        if path in seen:
+            continue
         seen.add(path)
         stats.scanned += 1
 

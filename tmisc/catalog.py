@@ -188,15 +188,41 @@ class Catalog:
         }
 
     # --- lectura -----------------------------------------------------------
+    def expand_id(self, ident: str) -> str | None:
+        """Prefijo hexadecimal -> id completo. None si no existe o es ambiguo.
+
+        IDENT_RE acepta de 8 a 64 hex precisamente para que un humano pueda
+        teclear un id corto. Un prefijo ambiguo NO resuelve: servir "el primero"
+        de dos tracks distintos sería reproducir en silencio la canción
+        equivocada, que es peor que un 404.
+        """
+        if len(ident) == 64:
+            row = self.db.execute("SELECT id FROM tracks WHERE id=?", (ident,)).fetchone()
+            return row["id"] if row else None
+        # El ident viene validado como [0-9a-f]+, así que no puede colar un
+        # metacaracter de LIKE ('%' o '_').
+        rows = self.db.execute(
+            "SELECT id FROM tracks WHERE id LIKE ? LIMIT 2", (ident + "%",)
+        ).fetchall()
+        return rows[0]["id"] if len(rows) == 1 else None
+
     def resolve(self, track_id: str) -> sqlite3.Row | None:
-        """Ruta y offsets del mejor fichero que contiene este track."""
+        """Ruta y offsets del mejor fichero que contiene este track.
+
+        Acepta prefijos. `row["id"]` es siempre el id completo: los llamantes
+        deben usarlo como id canónico a partir de aquí (ETags, verificación del
+        BLAKE3 al traer de un peer, nombres en el caché...).
+        """
+        full = self.expand_id(track_id)
+        if full is None:
+            return None
         return self.db.execute(
             """SELECT f.*, t.mime, t.ext, t.title, t.artist, t.album, t.streamable
                FROM files f JOIN tracks t ON t.id = f.id
                WHERE f.id = ?
                ORDER BY f.preferred DESC, f.container_ver DESC
                LIMIT 1""",
-            (track_id,),
+            (full,),
         ).fetchone()
 
     def get_meta_json(self, track_id: str) -> str | None:
