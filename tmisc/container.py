@@ -145,6 +145,29 @@ def _from_footer(path: str, footer: fmt.Footer, size: int, mtime_ns: int) -> Tmi
     )
 
 
+AUDIO_EXTENSIONS = (".mp3", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".m4b",
+                    ".aac", ".wav", ".aif", ".aiff", ".wv", ".ape")
+
+
+def probe_plain(path: str) -> TmiscInfo:
+    """Un fichero de audio normal, indexado en su sitio: el "audio" es el fichero entero.
+
+    Se sirve tal cual (con sus tags y su carátula embebida), así que se reproduce
+    en cualquier cliente. El id NO sale de aquí: ver `audioid.content_id`.
+    """
+    st = os.stat(path)
+    with open(path, "rb") as fh:
+        head = fh.read(64)
+    codec, mime, ext = sniff(head)
+    if codec == "bin":
+        raise NotTmiscError("No es un formato de audio reconocible.")
+    return TmiscInfo(
+        path=path, file_size=st.st_size, version=0, mode=fmt.MODE_PLAIN,
+        audio_offset=0, audio_size=st.st_size, image_size=0,
+        ext=ext, mime=mime, container=0, mtime_ns=st.st_mtime_ns,
+    )
+
+
 def read_meta_at(path: str, offset: int, length: int) -> TmiscMeta:
     with open(path, "rb") as fh:
         fh.seek(offset)

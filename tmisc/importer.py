@@ -1,8 +1,7 @@
 """Importador: audio suelto ya presente en disco → .tmisc.
 
-NO descarga nada. Escanea lo que ya está en el disco, exactamente el mismo
-contrato que `TidolCore::import_path(path) -> ImportSummary`, que el workspace de
-Tidol ya tenía documentado como placeholder de la feature `local-library`.
+NO descarga nada: escanea lo que ya está en el disco y crea una COPIA en .tmisc.
+Es opcional — el nodo sirve la biblioteca tal cual sin convertirla (scanner.py).
 
 La portada se busca, por orden: la embebida en los tags, un cover.jpg/folder.jpg
 junto al fichero, y si no hay ninguna, un identicon derivado del hash del audio.

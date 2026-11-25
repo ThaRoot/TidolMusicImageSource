@@ -76,7 +76,8 @@ def test_prefijo_corto_reproduce(tmp_path, library):
 
     # El id canónico manda: de él cuelgan el ETag y la verificación del BLAKE3.
     assert r.headers["x-tmisc-id"] == full
-    assert r.headers["etag"] == f'"{full}"'
+    assert r.headers["etag"] == cli.get(f"/stream/{full}").headers["etag"]
+    assert r.headers["etag"].startswith(f'"{full[:32]}-')
 
 
 def test_prefijo_corto_en_track_cover_y_file(tmp_path, library):

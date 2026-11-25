@@ -138,11 +138,31 @@ dd if=cancion.tmisc of=salida.mp3 bs=1 skip=$AUDIO_OFFSET count=$AUDIO_SIZE
 
 ## 5. Identidad del contenido
 
-**`id = BLAKE3-256(bytes del audio)`**, en hexadecimal. Del *audio*, no del
-archivo.
+**`id = BLAKE3-256(audio sin etiquetas)`**, en hexadecimal. Esquema
+**`b3-untagged-1`** (lo anuncian `/.well-known/tmisc.json` y `/p2p/v1/ping` como
+`id_scheme`; dos nodos con esquemas distintos no comparten ids).
 
-Consecuencia: dos `.tmisc` con la misma canción y distinta portada tienen el
-**mismo id**, así que el catálogo y el P2P deduplican solos.
+"Audio sin etiquetas" según el formato del audio (dentro de un `.tmisc`, el del
+audio embebido; suelto en disco, el del fichero):
+
+| Formato | Qué se hashea |
+| :--- | :--- |
+| mp3 / aac | todo menos ID3v2 (inicio) e ID3v1 / APEv2 / Lyrics3v2 (final) |
+| flac | solo los frames: tras `fLaC` y el último bloque de metadatos |
+| ogg / opus | el contenido de los paquetes de audio del primer stream lógico (no las cabeceras de página, que cambian al reescribir tags) |
+| m4a / mp4 | el contenido de los átomos `mdat` |
+| wav / aiff | el chunk `data` / `SSND` |
+| otro | el audio entero; el id es **débil** (editar tags lo cambia) |
+
+Consecuencias:
+- Editar etiquetas o la portada embebida **no cambia el id**.
+- La misma canción suelta y dentro de un `.tmisc` (con cualquier portada) es el
+  **mismo track**: el catálogo y el P2P deduplican solos.
+- El id **no garantiza la integridad del fichero** (un byte corrupto dentro de
+  las etiquetas no lo cambia). Para eso, `/p2p/v1/track` anuncia `file_b3`
+  (BLAKE3 del fichero entero) y quien descarga comprueba **las dos cosas**.
+- El campo `audio_blake3` del footer v2 sigue siendo lo que era: integridad del
+  slice de audio *con* sus etiquetas. No es el id.
 
 BLAKE3 y no SHA-256 porque BLAKE3 es un **árbol de Merkle nativo**: permite
 verificar un fragmento arbitrario contra el hash raíz sin tener el archivo
@@ -181,7 +201,7 @@ Campos que **cargan peso** (no son decorativos):
 - **`audio.ext`** — construye `/stream/{id}.{ext}`; varios clientes deducen el
   formato de la URL.
 - **`audio.duration_ms`** — el catálogo y las playlists la muestran sin decodificar.
-- **`ids.recording_mbid`** — mapea 1:1 a `album_tracks.track_mbid` de Tidol.
+- **`ids.recording_mbid`** — el MBID de la grabación en MusicBrainz (el que escribe Picard).
 
 ## 7. Contrato HTTP del nodo
 

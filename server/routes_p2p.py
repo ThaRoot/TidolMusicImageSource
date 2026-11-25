@@ -135,6 +135,8 @@ def p2p_track(ident: str, request: Request):
         "ext": row["ext"],
         "streamable": row["streamable"],
         "container_ver": row["container_ver"],
+        "mtime_ns": row["mtime_ns"],
+        "file_b3": row["file_b3"],
         "mode": row["mode"],
         "meta": json.loads(raw) if raw else None,
     })
@@ -157,8 +159,8 @@ def p2p_file(ident: str, request: Request):
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": "application/octet-stream",
-        "ETag": f'"f-{track_id}"',
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": f'"f-{track_id[:32]}-{row["file_size"]:x}-{row["mtime_ns"]:x}"',
+        "Cache-Control": "public, max-age=86400",
         "X-Tmisc-Id": track_id,
     }
     return range_response(
