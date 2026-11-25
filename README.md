@@ -1,17 +1,26 @@
-# TMISC — un archivo = portada + audio + metadatos, y suena en VLC
+# TMISC — tu biblioteca, tus dispositivos, tus amigos
 
-Un `.tmisc` es **un BMP válido** (se abre en cualquier visor de imágenes) que
-lleva dentro el archivo de audio íntegro, sus metadatos y su hash.
+Un nodo que sirve **tu biblioteca de música tal como está en disco** (mp3, flac,
+opus, m4a, wav…) a tus dispositivos, y la comparte **P2P con amigos de confianza**
+sin servidores de terceros. Ver [docs/VISION.md](docs/VISION.md).
 
-El servicio que lo acompaña lo sirve por HTTP con soporte de `Range`, así que
-**VLC, mpv, el navegador, una rocola o un ESP32 lo reproducen con seek sin saber
-nada del formato**. El demuxer se convierte en el protocolo de red.
+```bash
+tmisc serve --library ~/Music --host 0.0.0.0     # no convierte ni copia nada
+
+vlc http://192.168.1.70:8787/playlist.xspf      # la biblioteca entera, con carátulas
+```
+
+Lo sirve por HTTP con `Range`, así que **VLC, mpv, el navegador o una rocola lo
+reproducen con seek**. Cada pista se identifica por el hash de su audio **sin
+etiquetas**: editarlas en Picard no cambia nada, y la misma canción en dos sitios
+es un solo track.
+
+Además existe el formato **`.tmisc`** (opcional): un BMP válido que lleva dentro
+el audio íntegro, sus metadatos y su hash, para pasar una canción con su portada
+en un solo archivo.
 
 ```bash
 tmisc encode cancion.flac -c portada.jpg -o cancion.tmisc --artist "Radiohead"
-tmisc serve --library ~/musica --host 0.0.0.0
-
-vlc http://192.168.1.70:8787/playlist.xspf      # la biblioteca entera, con carátulas
 ```
 
 ## Qué cambió respecto de v1 (y por qué)
@@ -65,11 +74,15 @@ dd if=cancion.tmisc of=salida.mp3 bs=1 skip=750054 count=9602656
 
 La especificación binaria completa está en **[SPEC.md](SPEC.md)**.
 
-### El id es el hash del audio
+### El id es el hash del audio sin etiquetas
 
-`id = BLAKE3(bytes del audio)` — del audio, no del archivo. Dos `.tmisc` con la
-misma canción y distinta portada **son el mismo track**: el catálogo y el P2P
-deduplican solos.
+`id = BLAKE3(audio sin etiquetas)`: sin ID3/APE en mp3, solo los frames en flac,
+los paquetes de audio en ogg/opus, `mdat` en m4a (detalle en [SPEC.md](SPEC.md) §5).
+Editar etiquetas o portada **no cambia el id**, y la misma canción suelta y en un
+`.tmisc` **es el mismo track**: el catálogo y el P2P deduplican solos.
+
+El id no cubre las etiquetas, así que no sirve para saber si un fichero llegó
+intacto: por eso el P2P verifica además el hash del fichero entero.
 
 BLAKE3 y no SHA-256 porque es un árbol de Merkle nativo: permite verificar un
 fragmento contra el hash raíz sin tener el archivo entero. Es lo que hará barato
@@ -88,10 +101,11 @@ tmisc encode cancion.flac --cover-depth 8           # BMP paletizado, ~1.03x
 tmisc encode cancion.flac                           # sin portada: identicon del hash
 ```
 
-### Importar una biblioteca que ya tienes
+### Convertir una biblioteca a .tmisc (opcional)
 
-Escanea audio **que ya está en tu disco** (no descarga nada), lee sus tags y su
-carátula embebida, y lo empaqueta:
+**No hace falta para servirla**: `tmisc serve --library ~/Music` ya la sirve tal
+cual. Esto solo es para quien quiera tener cada canción con su portada en un único
+archivo. Lee tags y carátula embebida y crea una COPIA en `.tmisc` (ocupa el doble):
 
 ```bash
 tmisc import ~/Music --library ~/tmisc-lib
@@ -207,20 +221,11 @@ el audio. Si necesitas confidencialidad, cifra el audio antes de empaquetarlo.
   siquiera se registran**, así que un despliegue mal configurado no puede acabar
   sirviendo audio.
 
-## Relación con Tidol
+## Despliegue
 
-El backend de Tidol **no sirve audio a propósito** (`Caddyfile.prod`: *"Legal
-Embed Architecture — No audio streaming/proxying"*): solo entrega metadatos,
-carátulas y letras, y la reproducción la resuelve el cliente contra fuentes
-oficiales.
-
-TMISC no cambia eso. Es un **nodo de red local**: el audio vive en tu máquina y
-nunca pasa por el VPS. Encaja en el hueco que el propio workspace ya tenía
-reservado — la feature `local-library` de `tidol-core`, y el `import_path()` que
-`tidol-shell` ya documentaba como pendiente.
-
-La recomendación es **no desplegar TMISC en el VPS**, ni siquiera en perfil
-`tools`.
+TMISC es un **nodo para tu casa**: el audio vive en tu máquina. Pensado para la
+LAN y, fuera de casa o entre casas, para Tailscale. No lo expongas a Internet ni
+lo despliegues en un VPS.
 
 ## Desarrollo
 

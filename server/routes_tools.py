@@ -2,8 +2,7 @@
 
 Estos endpoints no sirven la biblioteca: transforman lo que se les sube. Son los
 únicos que podrían vivir fuera de la LAN, aunque la recomendación es no
-desplegarlos en el VPS de Tidol (ver README): la Legal Embed Architecture dice
-que por ahí no pasan bytes de audio.
+exponerlos a Internet (ver README, "Despliegue").
 """
 
 import io

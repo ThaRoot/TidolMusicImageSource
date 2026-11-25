@@ -11,7 +11,7 @@ Campos que cargan peso (no son decorativos):
   audio.ext          -> construye /stream/{id}.{ext}; varios clientes sniffean
                         el formato por la URL.
   audio.duration_ms  -> el catálogo y las playlists la muestran sin decodificar.
-  ids.recording_mbid -> mapea 1:1 a album_tracks.track_mbid de TidolCore.
+  ids.recording_mbid -> MBID de la grabación en MusicBrainz (el que escribe Picard).
 """
 
 import json

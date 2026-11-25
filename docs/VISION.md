@@ -2,7 +2,7 @@
 
 > Documento de dirección. Fija **qué problema resolvemos** y **las decisiones ya
 > tomadas**, para que cada cambio de código se pueda contrastar contra esto.
-> Última revisión: 2026-11-24.
+> Última revisión: 2026-11-24 (etapa 1 terminada).
 
 ## El problema
 
@@ -66,7 +66,8 @@ vive en la máquina de un amigo.
   puede escuchar un stream puede grabarlo. El permiso "solo streaming" evita copias
   *accidentales* y descontroladas, no a un amigo malicioso (para eso: no lo emparejes).
 - **No se expone a Internet** ni se abren puertos en el router.
-- **No se integra con Tidol** por ahora. TMISC es independiente.
+- **No se integra con Tidol.** Comparte origen y nombre, nada más: TMISC es un
+  proyecto independiente. Una integración futura habría que diseñarla aparte.
 - **Sin transcodificación** en la primera etapa (ver preguntas abiertas).
 
 ## Plan por etapas
@@ -75,7 +76,7 @@ Cada etapa se puede usar sola y deja las pruebas en verde.
 
 | # | Etapa | Resultado usable |
 | :- | :--- | :--- |
-| 1 | **Biblioteca en sitio + id sin etiquetas** | `tmisc serve --library ~/Music` sirve tu colección sin convertir nada. |
+| 1 | ✅ **Biblioteca en sitio + id sin etiquetas** | `tmisc serve --library ~/Music` sirve tu colección sin convertir nada. |
 | 2 | **Tokens por dispositivo** | `tmisc devices add iphone` / `ls` / `rm`. Reemplaza el token único. |
 | 3 | **API Subsonic (subconjunto)** | Amperfy en el iPhone navega y reproduce tu biblioteca. |
 | 4 | **Catálogo de amigos en Subsonic** | Las canciones del amigo aparecen en la app, como otra carpeta. |
@@ -84,13 +85,14 @@ Cada etapa se puede usar sola y deja las pruebas en verde.
 
 ## Preguntas abiertas
 
-- **Migración de ids.** Los `.tmisc` existentes tienen id = hash del audio *con*
-  etiquetas. Opciones: recalcular al indexar (el id del footer queda como dato
-  histórico) o versionar el esquema de id en el protocolo P2P. A decidir en la
-  etapa 1; afecta a la compatibilidad con nodos que aún corran la versión actual.
-- **Formatos sin cabecera de etiquetas separable** (Opus/Ogg, M4A): extraer solo
-  los paquetes/átomos de audio es más trabajo. Primera versión: hash del archivo
-  completo, marcado como "id débil", y mejorar después.
+- ~~Migración de ids~~ **Resuelto en la etapa 1:** el id se recalcula al
+  indexar (esquema `b3-untagged-1`); el hash del footer de un `.tmisc` queda solo
+  como integridad. El esquema se anuncia en `/.well-known/tmisc.json` y en el ping
+  P2P: dos nodos con esquemas distintos no comparten ids, hay que actualizar ambos.
+- ~~Opus/Ogg y M4A~~ **Resuelto:** se hashean los paquetes de audio (Ogg) y los
+  átomos `mdat` (MP4). Solo los formatos desconocidos caen a "id débil".
+- **Integridad P2P (descubierto en la etapa 1).** Como el id ya no cubre las
+  etiquetas, la pasarela verifica además `file_b3`, el BLAKE3 del fichero entero.
 - **Transcodificación para datos móviles** (FLAC → Opus 128k con ffmpeg). Subsonic
   ya tiene el parámetro `maxBitRate`; se puede añadir tras la etapa 3.
 - **Subsonic con contraseña o con API key.** El esquema clásico (`t` + `s`, MD5

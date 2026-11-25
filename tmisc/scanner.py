@@ -1,14 +1,15 @@
-"""Escaneo de la biblioteca — barato por diseño.
+"""Escaneo de la biblioteca: .tmisc y ficheros de audio normales, en su sitio.
 
-Coste por fichero ya conocido: 1 `stat`.
-Coste por fichero nuevo:       ~3 syscalls y menos de 64 KB leídos (footer + JSON).
+Coste por fichero ya conocido: 1 `stat` (re-escanear 10.000 pistas es ~1 s).
+Coste por fichero nuevo o modificado: leer su audio UNA vez para calcular el id
+(`audioid.content_id`, el BLAKE3 del audio sin etiquetas). BLAKE3 va a velocidad
+de disco, así que la primera indexación de una biblioteca grande tarda lo que
+tarda leerla; a partir de ahí, (tamaño, mtime) en SQLite evita repetirlo.
 
-Nunca se abre Pillow y nunca se lee el audio. Por eso una biblioteca de 10.000
-pistas y 200 GB se re-escanea en cosa de un segundo.
+El hash que trae el footer de un .tmisc v2 NO se usa como id: cubre el audio CON
+sus etiquetas, y entonces la misma canción suelta y empaquetada tendría dos ids.
 
-Excepciones: los .tmisc v1 no traen hash en el trailer, así que hay que leer su
-audio una vez para calcular el BLAKE3; y los LSB hay que decodificarlos. Ambas
-cosas se hacen UNA vez y quedan cacheadas en SQLite.
+Los ficheros de audio no se convierten ni se copian: se sirven tal cual.
 """
 
 import os
@@ -16,12 +17,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .audioid import content_id, content_id_bytes
 from .catalog import Catalog
-from .container import probe, read_meta
+from .container import AUDIO_EXTENSIONS, probe, probe_plain, read_meta
 from .errors import TmiscError
 from .hashing import hash_file_range
+from .meta import CoverMeta, TmiscMeta
 
-EXTENSIONS = (".tmisc", ".bmp")
+TMISC_EXTENSIONS = (".tmisc", ".bmp")
+EXTENSIONS = TMISC_EXTENSIONS + AUDIO_EXTENSIONS
 
 
 @dataclass
@@ -117,26 +121,64 @@ def scan(roots: str | Sequence[str], catalog: Catalog,
 
 
 def index_file(path: str, catalog: Catalog) -> None:
-    """Indexa UN fichero: lo usa la pasarela P2P con los .tmisc recién traídos."""
+    """Indexa UN fichero: lo usa la pasarela P2P con lo recién traído de un peer."""
     _index_one(path, catalog)
 
 
 def _index_one(path: str, catalog: Catalog) -> None:
-    info = probe(path)
+    if path.lower().endswith(TMISC_EXTENSIONS):
+        _index_tmisc(path, catalog)
+    else:
+        _index_plain(path, catalog)
 
-    if info.audio_blake3:
-        track_id = info.audio_blake3.hex()
-    elif info.streamable:
-        # v1 append: no trae hash. Se calcula leyendo el audio una sola vez.
+
+def _index_tmisc(path: str, catalog: Catalog) -> None:
+    info = probe(path)
+    if info.streamable:
         with open(path, "rb") as fh:
-            track_id = hash_file_range(fh, info.audio_offset, info.audio_size).hex()
+            track_id, _strong = content_id(fh, info.audio_offset, info.audio_size)
     else:
         # LSB: el audio hay que sacarlo de los píxeles antes de poder hashearlo.
-        from .hashing import hash_bytes
         from .legacy_lsb import extract_lsb_audio
-        track_id = hash_bytes(extract_lsb_audio(info)).hex()
+        track_id, _strong = content_id_bytes(extract_lsb_audio(info))
 
     catalog.upsert(
         info, track_id, read_meta(info),
         streamable="direct" if info.streamable else "cached",
+        file_b3=_file_hash(path),
     )
+
+
+def _index_plain(path: str, catalog: Catalog) -> None:
+    from .encode import read_tags
+    from .importer import find_embedded_cover, find_folder_cover
+
+    info = probe_plain(path)
+    with open(path, "rb") as fh:
+        track_id, strong = content_id(fh, 0, info.file_size)
+
+    audio, track, ids = read_tags(path)
+    audio.mime, audio.ext, audio.size = info.mime, info.ext, info.file_size
+    audio.codec = info.ext
+    has_cover = find_embedded_cover(path) is not None or find_folder_cover(path) is not None
+    if not track.title:
+        track.title = os.path.splitext(os.path.basename(path))[0]
+    meta = TmiscMeta(
+        id=track_id, audio=audio, track=track, ids=ids,
+        cover=CoverMeta(present=has_cover, container="embedded" if has_cover else ""),
+        x={"id_strength": "strong" if strong else "weak"},
+    )
+    catalog.upsert(info, track_id, meta, streamable="direct", file_b3=_file_hash(path))
+
+
+def _file_hash(path: str) -> str:
+    """BLAKE3 del fichero ENTERO (no del audio): la integridad de una copia P2P.
+
+    El id deja fuera las etiquetas a propósito, así que no basta para saber que
+    un fichero llegó intacto: un byte corrupto dentro del ID3 no lo cambiaría. El
+    peer anuncia este hash y quien descarga comprueba los dos. Justo después de
+    `content_id` el fichero está en la caché de páginas: esta segunda lectura
+    casi no toca el disco.
+    """
+    with open(path, "rb") as fh:
+        return hash_file_range(fh, 0, os.fstat(fh.fileno()).st_size).hex()

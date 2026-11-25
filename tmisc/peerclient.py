@@ -16,7 +16,10 @@ import time
 import httpx
 
 from .errors import TmiscError
+from .audioid import content_id
 from .hashing import hash_file_range
+from .container import AUDIO_EXTENSIONS
+from .sniff import safe_ext
 from .identity import NodeIdentity, pinned_ssl_context
 from .peers import Peer, session_message
 
@@ -137,18 +140,24 @@ class PeerClient:
         return resp
 
     async def download_file(self, track_id: str, dest_dir: str) -> tuple[str, dict]:
-        """Descarga el .tmisc completo, VERIFICADO, a `dest_dir`.
+        """Descarga el fichero completo (.tmisc o audio suelto), VERIFICADO, a `dest_dir`.
 
-        El id es el BLAKE3 del audio, así que la verificación es gratis: se
-        hashea el slice [audio_offset, audio_offset+audio_size) del fichero
-        descargado y se compara con el propio id. Si no cuadra, el .part se
-        borra y no se indexa nada.
+        El id es el hash del audio sin etiquetas (`audioid.content_id`), así que
+        la verificación es gratis: se recalcula sobre lo descargado y se compara
+        con el propio id. Si no cuadra, el .part se borra y no se indexa nada.
         """
         meta = await self.track(track_id)
         if meta is None:
             raise PeerError(f"el peer ya no tiene {track_id[:12]}")
 
-        final = os.path.join(dest_dir, f"{track_id}.tmisc")
+        # Un audio suelto se guarda con su extensión real para que el escáner lo
+        # reconozca al reiniciar; lo demás es un .tmisc.
+        ext = "tmisc"
+        if meta.get("container_ver") == 0:
+            candidate = safe_ext(str(meta.get("ext") or ""))
+            if f".{candidate}" in AUDIO_EXTENSIONS:
+                ext = candidate
+        final = os.path.join(dest_dir, f"{track_id}.{ext}")
         part = final + ".part"
         resp = await self._request("GET", f"/p2p/v1/file/{track_id}", stream=True)
         try:
@@ -163,8 +172,17 @@ class PeerClient:
         try:
             if os.path.getsize(part) != meta["file_size"]:
                 raise PeerError("descarga truncada")
+            # 1) Integridad del fichero entero (incluye etiquetas y portada).
+            if meta.get("file_b3"):
+                with open(part, "rb") as fh:
+                    whole = hash_file_range(fh, 0, meta["file_size"]).hex()
+                if whole != meta["file_b3"]:
+                    raise PeerError(
+                        f"el fichero descargado de {self.peer.node_id[:12]} llegó "
+                        f"corrupto (no coincide con el hash que anunció el peer)")
+            # 2) Que sea de verdad la canción pedida: su id de contenido.
             with open(part, "rb") as fh:
-                got = hash_file_range(fh, meta["audio_offset"], meta["audio_size"]).hex()
+                got, _strong = content_id(fh, meta["audio_offset"], meta["audio_size"])
             if got != track_id:
                 raise PeerError(
                     f"el audio descargado de {self.peer.node_id[:12]} no coincide "

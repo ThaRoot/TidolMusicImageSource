@@ -23,14 +23,20 @@ COPY_CHUNK = 1 << 20
 
 def probe_audio_tags(path: str) -> tuple[AudioMeta, TrackMeta]:
     """Duración, bitrate y tags del audio original, vía mutagen. Todo opcional."""
-    audio, track = AudioMeta(), TrackMeta()
+    audio, track, _ids = read_tags(path)
+    return audio, track
+
+
+def read_tags(path: str) -> tuple[AudioMeta, TrackMeta, IdsMeta]:
+    """Como probe_audio_tags, más los MBID de MusicBrainz (los que escribe Picard)."""
+    audio, track, ids = AudioMeta(), TrackMeta(), IdsMeta()
     try:
         import mutagen
         mf = mutagen.File(path, easy=True)
     except Exception:
-        return audio, track
+        return audio, track, ids
     if mf is None:
-        return audio, track
+        return audio, track, ids
 
     info = getattr(mf, "info", None)
     if info is not None:
@@ -63,7 +69,15 @@ def probe_audio_tags(path: str) -> tuple[AudioMeta, TrackMeta]:
     if genre:
         track.genre = [genre]
     track.isrc = first("isrc")
-    return audio, track
+    # Claves "easy" de mutagen: valen igual para ID3 (UFID/TXXX), Vorbis comments y MP4.
+    for key, attr in (("musicbrainz_trackid", "recording_mbid"),
+                      ("musicbrainz_albumid", "release_mbid"),
+                      ("musicbrainz_artistid", "artist_mbid")):
+        try:
+            setattr(ids, attr, first(key))
+        except Exception:
+            pass
+    return audio, track, ids
 
 
 def encode_to_file(

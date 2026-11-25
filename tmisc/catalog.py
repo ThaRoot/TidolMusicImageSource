@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS files (
   image_size     INTEGER NOT NULL,
   audio_offset   INTEGER NOT NULL,     -- <- el seek O(1) sale de aquí
   audio_size     INTEGER NOT NULL,
-  preferred      INTEGER NOT NULL DEFAULT 0
+  preferred      INTEGER NOT NULL DEFAULT 0,
+  file_b3        TEXT                 -- BLAKE3 del fichero ENTERO: integridad P2P
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_id     ON files(id);
@@ -109,6 +110,10 @@ class Catalog:
         self.db = sqlite3.connect(db_path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        # Catálogos creados antes de que existiera la columna.
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(files)")}
+        if "file_b3" not in cols:
+            self.db.execute("ALTER TABLE files ADD COLUMN file_b3 TEXT")
         try:
             self.db.executescript(FTS_SCHEMA)
             self.has_fts = True
@@ -118,7 +123,7 @@ class Catalog:
 
     # --- escritura ---------------------------------------------------------
     def upsert(self, info: TmiscInfo, track_id: str, meta: TmiscMeta | None,
-               streamable: str = "direct") -> None:
+               streamable: str = "direct", file_b3: str | None = None) -> None:
         t = meta.track if meta else None
         a = meta.audio if meta else None
         ids = meta.ids if meta else None
@@ -133,6 +138,15 @@ class Catalog:
                    title=COALESCE(excluded.title, tracks.title),
                    artist=COALESCE(excluded.artist, tracks.artist),
                    album=COALESCE(excluded.album, tracks.album),
+                   album_artist=COALESCE(excluded.album_artist, tracks.album_artist),
+                   track_no=COALESCE(excluded.track_no, tracks.track_no),
+                   disc_no=COALESCE(excluded.disc_no, tracks.disc_no),
+                   year=COALESCE(excluded.year, tracks.year),
+                   -- el mismo track puede venir de varios ficheros (suelto y .tmisc):
+                   -- un MBID que aporte cualquiera de ellos no se pierde.
+                   recording_mbid=COALESCE(excluded.recording_mbid, tracks.recording_mbid),
+                   release_mbid=COALESCE(excluded.release_mbid, tracks.release_mbid),
+                   artist_mbid=COALESCE(excluded.artist_mbid, tracks.artist_mbid),
                    meta_json=COALESCE(excluded.meta_json, tracks.meta_json),
                    streamable=excluded.streamable""",
             (
@@ -150,17 +164,17 @@ class Catalog:
         )
         self.db.execute(
             """INSERT INTO files (path, id, file_size, mtime_ns, container_ver, mode,
-                   image_size, audio_offset, audio_size)
-               VALUES (?,?,?,?,?,?,?,?,?)
+                   image_size, audio_offset, audio_size, file_b3)
+               VALUES (?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(path) DO UPDATE SET
                    id=excluded.id, file_size=excluded.file_size, mtime_ns=excluded.mtime_ns,
                    container_ver=excluded.container_ver, mode=excluded.mode,
                    image_size=excluded.image_size, audio_offset=excluded.audio_offset,
-                   audio_size=excluded.audio_size""",
+                   audio_size=excluded.audio_size, file_b3=excluded.file_b3""",
             (
                 info.path, track_id, info.file_size, info.mtime_ns,
                 info.version, info.mode, info.image_size,
-                info.audio_offset, info.audio_size,
+                info.audio_offset, info.audio_size, file_b3,
             ),
         )
         if self.has_fts:

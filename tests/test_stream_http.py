@@ -86,11 +86,13 @@ def test_cors_expuesto(client, track_id):
     assert "content-range" in expuestos and "accept-ranges" in expuestos
 
 
-def test_etag_inmutable(client, track_id):
-    """El id es una content-address: el contenido de la URL no puede cambiar."""
+def test_etag_ligado_al_fichero(client, track_id):
+    """El id identifica el AUDIO; los bytes servidos pueden cambiar (tags) sin que
+    cambie. El ETag va ligado a la versión del fichero, para que un Range
+    reanudado con If-Range nunca mezcle dos versiones, y no se promete inmutable."""
     r = client.get(f"/stream/{track_id}", headers={"Range": "bytes=0-9"})
-    assert r.headers["etag"] == f'"{track_id}"'
-    assert "immutable" in r.headers["cache-control"]
+    assert r.headers["etag"].startswith(f'"{track_id[:32]}-')
+    assert "immutable" not in r.headers["cache-control"]
 
 
 def test_cover_es_un_slice_de_la_imagen(client, track_id):

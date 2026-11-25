@@ -45,6 +45,9 @@ MODE_LSB_V1 = 1        # legacy: audio en los bits menos significativos
 MODE_APPEND_V1 = 2     # legacy: BMP + audio + trailer de 27 B
 MODE_APPEND_V2 = 3     # el modo de producción
 MODE_LSB_V2 = 4        # LSB con footer v2 (indexable, pero no streameable)
+# Solo en el catálogo, nunca en un footer: un fichero de audio normal (mp3, flac…)
+# indexado en su sitio. Se sirve entero; su `container_ver` en el catálogo es 0.
+MODE_PLAIN = 0
 
 # --- Flags (u8) ---------------------------------------------------------------
 FLAG_ENCRYPTED = 0x01          # reservado; en v2.0 siempre 0

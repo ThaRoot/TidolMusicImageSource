@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
+from tmisc.audioid import ID_SCHEME
 from tmisc.playlists import cover_url, stream_url, to_m3u, to_xspf
 from tmisc.scanner import ScanStats, scan
 
@@ -94,7 +95,7 @@ def _playlist_tracks(cat, q, artist, album, ids, limit):
 def playlist_m3u(request: Request, q: str | None = None, artist: str | None = None,
                  album: str | None = None, ids: str | None = None, limit: int = 500):
     tracks = _playlist_tracks(get_catalog(request), q, artist, album, ids, limit)
-    body = to_m3u(tracks, base_url(request), title=q or album or artist or "Tidol",
+    body = to_m3u(tracks, base_url(request), title=q or album or artist or "TMISC",
                   token=get_settings(request).token or None)
     return PlainTextResponse(body, media_type="audio/x-mpegurl")
 
@@ -103,7 +104,7 @@ def playlist_m3u(request: Request, q: str | None = None, artist: str | None = No
 def playlist_xspf(request: Request, q: str | None = None, artist: str | None = None,
                   album: str | None = None, ids: str | None = None, limit: int = 500):
     tracks = _playlist_tracks(get_catalog(request), q, artist, album, ids, limit)
-    body = to_xspf(tracks, base_url(request), title=q or album or artist or "Tidol",
+    body = to_xspf(tracks, base_url(request), title=q or album or artist or "TMISC",
                    token=get_settings(request).token or None)
     return Response(body, media_type="application/xspf+xml")
 
@@ -112,8 +113,7 @@ def playlist_xspf(request: Request, q: str | None = None, artist: str | None = N
 def import_path(request: Request, payload: dict, background: BackgroundTasks):
     """Convierte audio suelto ya presente en disco a .tmisc. No descarga nada.
 
-    Mismo contrato que `TidolCore::import_path(path) -> ImportSummary`, que el
-    workspace de Tidol ya tenía documentado como placeholder.
+    Devuelve un resumen (importados / omitidos / errores) al terminar el job.
     """
     from tmisc.importer import import_tree
 
@@ -144,11 +144,12 @@ def import_path(request: Request, payload: dict, background: BackgroundTasks):
 
 @router.get("/.well-known/tmisc.json")
 def descriptor(request: Request):
-    """Lo que un peer (o el frontend de Tidol) sondea para saber si hay un nodo aquí."""
+    """Lo que un peer o un cliente sondea para saber si hay un nodo aquí."""
     s = get_settings(request)
     base = base_url(request)
     payload = {
         "tmisc": 2,
+        "id_scheme": ID_SCHEME,
         "node_name": s.node_name,
         "base_url": base,
         "tracks": get_catalog(request).count(),

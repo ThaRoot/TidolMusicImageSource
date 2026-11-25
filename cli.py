@@ -513,7 +513,7 @@ def main() -> None:
     e.add_argument("--title")
     e.add_argument("--artist")
     e.add_argument("--album")
-    e.add_argument("--mbid", help="MusicBrainz recording id (pegamento con Tidol)")
+    e.add_argument("--mbid", help="MusicBrainz recording id (el MBID que escribe Picard)")
     e.add_argument("--cover-side", type=int, default=500)
     e.add_argument("--cover-depth", type=int, default=24, choices=[8, 24])
     e.add_argument("--cover-container", default="bmp", choices=["bmp", "png", "jpeg"])

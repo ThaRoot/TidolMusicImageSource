@@ -34,7 +34,7 @@ def cover_url(base: str, t: CatalogTrack, token: str | None = None) -> str:
     return f"{base}/cover/{t.id}.jpg{_auth(token)}"
 
 
-def to_m3u(tracks: list[CatalogTrack], base: str, title: str = "Tidol",
+def to_m3u(tracks: list[CatalogTrack], base: str, title: str = "TMISC",
            token: str | None = None) -> str:
     lines = ["#EXTM3U", f"#PLAYLIST:{title}"]
     for t in tracks:
@@ -45,7 +45,7 @@ def to_m3u(tracks: list[CatalogTrack], base: str, title: str = "Tidol",
     return "\n".join(lines) + "\n"
 
 
-def to_xspf(tracks: list[CatalogTrack], base: str, title: str = "Tidol",
+def to_xspf(tracks: list[CatalogTrack], base: str, title: str = "TMISC",
             token: str | None = None) -> str:
     out = [
         '<?xml version="1.0" encoding="UTF-8"?>',

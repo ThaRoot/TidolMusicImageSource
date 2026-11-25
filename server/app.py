@@ -34,7 +34,7 @@ def create_app(settings: Settings | None = None, catalog: Catalog | None = None,
                     "con seek sin saber nada del formato.",
     )
 
-    # Sin CORS, el <audio crossOrigin="anonymous"> de TidolAudioEngine falla con
+    # Sin CORS, el <audio crossOrigin="anonymous"> de un reproductor web falla con
     # un error opaco. Y sin expose_headers, el JS no puede leer Content-Range.
     app.add_middleware(
         CORSMiddleware,
@@ -118,6 +118,8 @@ def create_peer_app(settings: Settings, identity, peers, catalog: Catalog,
 
     @app.get("/p2p/v1/ping")
     def ping():
-        return {"tmisc": 2, "node_id": identity.node_id, "proto": "p2p-v1"}
+        from tmisc.audioid import ID_SCHEME
+        return {"tmisc": 2, "node_id": identity.node_id, "proto": "p2p-v1",
+                "id_scheme": ID_SCHEME}
 
     return app

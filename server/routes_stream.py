@@ -11,7 +11,7 @@ Tres trampas que son la diferencia entre que funcione y que no:
          y methods=["GET","HEAD"], un HEAD envía el audio entero. Y VLC y mpv
          hacen HEAD para sondear si el servidor admite seek.
 
-  CORS   TidolAudioEngine pone crossOrigin='anonymous' en sus <audio>, así que
+  CORS   un reproductor web con crossOrigin='anonymous' en sus <audio>, así que
          sin Access-Control-Allow-Origin el elemento falla con un error opaco, y
          sin expose_headers el JS no puede leer Content-Range.
 
@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse
 from starlette.background import BackgroundTask
 
 from tmisc.container import CHUNK, TmiscInfo, iter_audio_slice
+from tmisc.format import MODE_PLAIN
 from tmisc.sniff import mime_for_ext
 
 from .deps import base_url, get_catalog, get_settings, parse_ident, require_token
@@ -122,6 +123,14 @@ def _pipe_remote(network, peer, track_id: str, abs_start: int, abs_end: int):
     return gen()
 
 
+def _etag(track_id: str, path: str, prefix: str = "") -> str:
+    try:
+        st = os.stat(path)
+        return f'"{prefix}{track_id[:32]}-{st.st_size:x}-{st.st_mtime_ns:x}"'
+    except OSError:
+        return f'"{prefix}{track_id}"'
+
+
 @router.api_route("/stream/{ident}", methods=["GET", "HEAD"])
 async def stream(ident: str, request: Request):
     track_id, info, remote = await _resolve_or_remote(request, parse_ident(ident))
@@ -138,10 +147,11 @@ async def stream(ident: str, request: Request):
     headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": mime,
-        # El id es una content-address: el contenido de una URL no puede cambiar
-        # nunca. ETag fuerte e immutable salen gratis.
-        "ETag": f'"{track_id}"',
-        "Cache-Control": "public, max-age=31536000, immutable",
+        # El id identifica el AUDIO, no los bytes que se sirven: editar los tags
+        # cambia el fichero sin cambiar el id. El ETag va ligado al fichero para
+        # que un Range reanudado (If-Range) nunca mezcle dos versiones.
+        "ETag": _etag(track_id, info.path),
+        "Cache-Control": "public, max-age=86400",
         # inline, no attachment: que el navegador reproduzca en vez de descargar.
         "Content-Disposition": f'inline; filename="{track_id[:16]}.{info.ext}"',
         "X-Tmisc-Id": track_id,
@@ -180,8 +190,9 @@ async def _stream_remote(request: Request, track_id: str, found):
         "Accept-Ranges": "bytes",
         "Content-Type": mime,
         # content-address: da igual de qué nodo salgan los bytes
-        "ETag": f'"{track_id}"',
-        "Cache-Control": "public, max-age=31536000, immutable",
+        # Ligado a la versión del fichero del peer (ver _etag): el id solo no basta.
+        "ETag": f'"{track_id[:32]}-{meta["file_size"]:x}-{meta.get("mtime_ns", 0):x}"',
+        "Cache-Control": "public, max-age=86400",
         "Content-Disposition": f'inline; filename="{track_id[:16]}.{meta["ext"]}"',
         "X-Tmisc-Id": track_id,
         "X-Tmisc-Source": peer.node_id[:16],
@@ -207,6 +218,9 @@ async def cover(ident: str, request: Request, size: int | None = None):
     if remote is not None:
         return await _cover_remote(request, track_id, remote, wants_jpeg, size)
 
+    if info.mode == MODE_PLAIN:
+        return _cover_plain(request, track_id, info, wants_jpeg, size)
+
     if not wants_jpeg:
         # El slice [0, image_size) es la imagen tal cual. Sin abrir Pillow.
         if not info.image_size:
@@ -217,7 +231,7 @@ async def cover(ident: str, request: Request, size: int | None = None):
             content=b"" if request.method == "HEAD" else data,
             media_type=info.image_mime,
             headers={"Content-Length": str(len(data)),
-                     "Cache-Control": "public, max-age=31536000, immutable"},
+                     "Cache-Control": "public, max-age=86400"},
         )
 
     # Variante JPEG: ~30x más pequeña que el BMP crudo. Se cachea en disco.
@@ -237,8 +251,49 @@ async def cover(ident: str, request: Request, size: int | None = None):
         content=b"" if request.method == "HEAD" else data,
         media_type="image/jpeg",
         headers={"Content-Length": str(len(data)),
-                 "Cache-Control": "public, max-age=31536000, immutable"},
+                 "Cache-Control": "public, max-age=86400"},
     )
+
+
+def _cover_plain(request: Request, track_id: str, info: TmiscInfo,
+                 wants_jpeg: bool, size: int | None):
+    """Portada de un fichero de audio normal: la embebida, o cover.jpg/folder.jpg.
+
+    A diferencia de un .tmisc, la portada puede cambiar sin que cambie el id
+    (editar la carátula en Picard no toca el audio): la caché va ligada al mtime
+    y no se marca como inmutable.
+    """
+    from tmisc.importer import find_embedded_cover, find_folder_cover
+
+    try:
+        mtime = os.stat(info.path).st_mtime_ns
+    except OSError:
+        raise HTTPException(410, "El fichero ya no está en disco; reindexa el catálogo.")
+    headers = {"Cache-Control": "public, max-age=3600", "ETag": f'"c-{track_id[:16]}-{mtime}"'}
+
+    side = max(32, min(size or 300, 1000))
+    cached = os.path.join(get_settings(request).cache_dir, "cover",
+                          f"{track_id}_{side}_{mtime}.jpg")
+    if wants_jpeg and os.path.exists(cached):
+        with open(cached, "rb") as fh:
+            data = fh.read()
+        mime = "image/jpeg"
+    else:
+        data = find_embedded_cover(info.path) or find_folder_cover(info.path)
+        if not data:
+            raise HTTPException(404, "Este fichero no tiene portada.")
+        mime = _image_mime(data[:4])
+        if wants_jpeg:
+            from tmisc.cover import _fit_square, load_cover
+            _fit_square(load_cover(data).convert("RGB"), side).save(
+                cached, format="JPEG", quality=85, optimize=True)
+            with open(cached, "rb") as fh:
+                data = fh.read()
+            mime = "image/jpeg"
+
+    headers["Content-Length"] = str(len(data))
+    return Response(content=b"" if request.method == "HEAD" else data,
+                    media_type=mime, headers=headers)
 
 
 def _image_mime(head: bytes) -> str:
@@ -279,7 +334,7 @@ async def _cover_remote(request: Request, track_id: str, found,
         content=b"" if request.method == "HEAD" else data,
         media_type=mime,
         headers={"Content-Length": str(len(data)),
-                 "Cache-Control": "public, max-age=31536000, immutable",
+                 "Cache-Control": "public, max-age=86400",
                  "X-Tmisc-Source": peer.node_id[:16]},
     )
 
@@ -322,16 +377,18 @@ async def track(ident: str, request: Request):
 
 @router.api_route("/file/{ident}", methods=["GET", "HEAD"])
 def file(ident: str, request: Request):
-    """El .tmisc entero, con Range. Para P2P y para descargar el contenedor."""
+    """El fichero entero (.tmisc o audio suelto), con Range. Para P2P y para descargar."""
     track_id, info = _resolve(get_catalog(request), parse_ident(ident))
     total = info.file_size
+    plain = info.mode == MODE_PLAIN
 
     headers = {
         "Accept-Ranges": "bytes",
-        "Content-Type": info.image_mime,
-        "ETag": f'"f-{track_id}"',
-        "Cache-Control": "public, max-age=31536000, immutable",
-        "Content-Disposition": f'attachment; filename="{track_id[:16]}.tmisc"',
+        "Content-Type": (info.mime or mime_for_ext(info.ext)) if plain else info.image_mime,
+        "ETag": _etag(track_id, info.path, "f-"),
+        "Cache-Control": "public, max-age=86400",
+        "Content-Disposition":
+            f'attachment; filename="{track_id[:16]}.{info.ext if plain else "tmisc"}"',
         "X-Tmisc-Id": track_id,
     }
 
