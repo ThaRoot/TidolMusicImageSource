@@ -91,6 +91,20 @@ class Settings:
     def fetched_dir(self) -> str:
         return os.path.join(self.cache_dir, "fetched")
 
+    @property
+    def scan_roots(self) -> list[str]:
+        """Raíces que componen el catálogo local: la biblioteca y lo traído de peers.
+
+        `fetched/` TIENE que estar aquí. El escaneo olvida todo path conocido que
+        no vuelva a ver, así que escanear solo `library/` desindexaba en cada
+        arranque lo que la pasarela había traído: el .tmisc seguía en disco pero
+        el nodo se lo volvía a pedir al peer. Caché inútil y tráfico regalado.
+        """
+        roots = [self.library]
+        if os.path.isdir(self.fetched_dir):
+            roots.append(self.fetched_dir)
+        return roots
+
     def ensure_dirs(self) -> None:
         os.makedirs(self.cache_dir, exist_ok=True)
         os.makedirs(os.path.join(self.cache_dir, "audio"), exist_ok=True)

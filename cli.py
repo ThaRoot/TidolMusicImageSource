@@ -130,7 +130,7 @@ def cmd_scan(a) -> None:
     cat = Catalog(settings.db_path)
     from tmisc.scanner import scan
 
-    stats = scan(settings.library, cat)
+    stats = scan(settings.scan_roots, cat)
     print(f"escaneados {stats.scanned} · nuevos {stats.added} · sin cambios "
           f"{stats.skipped} · eliminados {stats.removed} · fallidos {stats.failed}")
     for err in stats.errors:
@@ -151,7 +151,7 @@ def cmd_import(a) -> None:
         print(f"  ! {err}", file=sys.stderr)
 
     cat = Catalog(settings.db_path)
-    scan(settings.library, cat)
+    scan(settings.scan_roots, cat)
     print(f"catálogo: {cat.count()} tracks")
 
 
@@ -202,7 +202,7 @@ def cmd_serve(a) -> None:
     if settings.serves_audio:
         cat = Catalog(settings.db_path)
         from tmisc.scanner import scan
-        stats = scan(settings.library, cat)
+        stats = scan(settings.scan_roots, cat)
         print(f"biblioteca : {settings.library}")
         print(f"catálogo   : {cat.count()} tracks "
               f"(nuevos {stats.added}, fallidos {stats.failed})")

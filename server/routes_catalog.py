@@ -60,7 +60,7 @@ def rescan(request: Request, background: BackgroundTasks):
             with _jobs_lock:
                 _jobs[job_id]["stats"] = st.as_dict()
         try:
-            stats = scan(settings.library, cat, progress)
+            stats = scan(settings.scan_roots, cat, progress)
             with _jobs_lock:
                 _jobs[job_id] = {"state": "done", "stats": stats.as_dict()}
         except Exception as e:
@@ -94,7 +94,8 @@ def _playlist_tracks(cat, q, artist, album, ids, limit):
 def playlist_m3u(request: Request, q: str | None = None, artist: str | None = None,
                  album: str | None = None, ids: str | None = None, limit: int = 500):
     tracks = _playlist_tracks(get_catalog(request), q, artist, album, ids, limit)
-    body = to_m3u(tracks, base_url(request), title=q or album or artist or "Tidol")
+    body = to_m3u(tracks, base_url(request), title=q or album or artist or "Tidol",
+                  token=get_settings(request).token or None)
     return PlainTextResponse(body, media_type="audio/x-mpegurl")
 
 
@@ -102,7 +103,8 @@ def playlist_m3u(request: Request, q: str | None = None, artist: str | None = No
 def playlist_xspf(request: Request, q: str | None = None, artist: str | None = None,
                   album: str | None = None, ids: str | None = None, limit: int = 500):
     tracks = _playlist_tracks(get_catalog(request), q, artist, album, ids, limit)
-    body = to_xspf(tracks, base_url(request), title=q or album or artist or "Tidol")
+    body = to_xspf(tracks, base_url(request), title=q or album or artist or "Tidol",
+                   token=get_settings(request).token or None)
     return Response(body, media_type="application/xspf+xml")
 
 
@@ -129,7 +131,7 @@ def import_path(request: Request, payload: dict, background: BackgroundTasks):
     def run() -> None:
         try:
             summary = import_tree(src, settings, recursive=recursive)
-            scan(settings.library, cat)
+            scan(settings.scan_roots, cat)
             with _jobs_lock:
                 _jobs[job_id] = {"state": "done", "stats": summary}
         except Exception as e:
